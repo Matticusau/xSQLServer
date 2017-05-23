@@ -1,18 +1,3 @@
-data LocalizedData
-{
-    ConvertFrom-StringData @'
-
-FileNotFound=File not found in the environment path
-AbsolutePathOrFileName=Absolute path or file name expected
-InvalidArgument=Invalid argument: '{0}' with value: '{1}'
-InvalidArgumentAndMessage={0} {1}
-ErrorStarting=Failure starting process matching path '{0}'. Message: {1}
-FailureWaitingForProcessesToStart=Failed to wait for processes to start
-ProcessStarted=Process matching path '{0}' started in process ID {1}
-ProcessAlreadyStarted=Process matching path '{0}' already started in process ID {1}
-'@
-}
-
 Import-LocalizedData LocalizedData -filename xPDT.strings.psd1
 
 function ThrowInvalidArgumentError
@@ -51,6 +36,15 @@ function ResolvePath
     $Path = [Environment]::ExpandEnvironmentVariables($Path)
     if(IsRootedPath $Path)
     {
+        if(!(Test-Path $Path -PathType Leaf))
+        {
+            ThrowInvalidArgumentError "CannotFindRootedPath" ($LocalizedData.InvalidArgumentAndMessage -f ($LocalizedData.InvalidArgument -f "Path",$Path), $LocalizedData.FileNotFound)
+        }
+        return $Path
+    }
+    else
+    {
+        $Path = (Get-Item -Path $Path -ErrorAction SilentlyContinue).FullName
         if(!(Test-Path $Path -PathType Leaf))
         {
             ThrowInvalidArgumentError "CannotFindRootedPath" ($LocalizedData.InvalidArgumentAndMessage -f ($LocalizedData.InvalidArgument -f "Path",$Path), $LocalizedData.FileNotFound)
@@ -114,11 +108,11 @@ function ExtractArguments
     (
         [parameter(Mandatory = $true)]
         $functionBoundParameters,
-        
+
         [parameter(Mandatory = $true)]
         [string[]]
         $argumentNames,
-        
+
         [string[]]
         $newArgumentNames
     )
@@ -166,7 +160,7 @@ namespace Source
     public static class NativeMethods
     {
         //The following structs and enums are used by the various Win32 API's that are used in the code below
-        
+
         [StructLayout(LayoutKind.Sequential)]
         public struct STARTUPINFO
         {
@@ -218,6 +212,7 @@ namespace Source
             LOGON32_PROVIDER_WINNT40,
             LOGON32_PROVIDER_WINNT50
         }
+
         [StructLayout(LayoutKind.Sequential)]
         public struct SECURITY_ATTRIBUTES
         {
@@ -264,25 +259,25 @@ namespace Source
               EntryPoint = "CreateProcessAsUser", SetLastError = true,
               CharSet = CharSet.Ansi, CallingConvention = CallingConvention.StdCall)]
         public static extern bool CreateProcessAsUser(
-            IntPtr hToken, 
-            string lpApplicationName, 
+            IntPtr hToken,
+            string lpApplicationName,
             string lpCommandLine,
-            ref SECURITY_ATTRIBUTES lpProcessAttributes, 
+            ref SECURITY_ATTRIBUTES lpProcessAttributes,
             ref SECURITY_ATTRIBUTES lpThreadAttributes,
-            bool bInheritHandle, 
-            Int32 dwCreationFlags, 
+            bool bInheritHandle,
+            Int32 dwCreationFlags,
             IntPtr lpEnvrionment,
-            string lpCurrentDirectory, 
+            string lpCurrentDirectory,
             ref STARTUPINFO lpStartupInfo,
             ref PROCESS_INFORMATION lpProcessInformation
             );
 
         [DllImport("advapi32.dll", EntryPoint = "DuplicateTokenEx")]
         public static extern bool DuplicateTokenEx(
-            IntPtr hExistingToken, 
+            IntPtr hExistingToken,
             Int32 dwDesiredAccess,
             ref SECURITY_ATTRIBUTES lpThreadAttributes,
-            Int32 ImpersonationLevel, 
+            Int32 ImpersonationLevel,
             Int32 dwTokenType,
             ref IntPtr phNewToken
             );
@@ -299,11 +294,11 @@ namespace Source
 
         [DllImport("advapi32.dll", ExactSpelling = true, SetLastError = true)]
         internal static extern bool AdjustTokenPrivileges(
-            IntPtr htok, 
+            IntPtr htok,
             bool disall,
-            ref TokPriv1Luid newst, 
-            int len, 
-            IntPtr prev, 
+            ref TokPriv1Luid newst,
+            int len,
+            IntPtr prev,
             IntPtr relen
             );
 
@@ -312,14 +307,14 @@ namespace Source
 
         [DllImport("advapi32.dll", ExactSpelling = true, SetLastError = true)]
         internal static extern bool OpenProcessToken(
-            IntPtr h, 
-            int acc, 
+            IntPtr h,
+            int acc,
             ref IntPtr phtok
             );
 
         [DllImport("advapi32.dll", SetLastError = true)]
         internal static extern bool LookupPrivilegeValue(
-            string host, 
+            string host,
             string name,
             ref long pluid
             );
@@ -343,15 +338,15 @@ namespace Source
                     LogonProvider.LOGON32_PROVIDER_DEFAULT,
                     out hToken
                     );
-                if (!bResult) 
-                { 
-                    throw new Win32Exception("The user could not be logged on. Ensure that the user has an existing profile on the machine and that correct credentials are provided. Logon error #" + Marshal.GetLastWin32Error().ToString()); 
+                if (!bResult)
+                {
+                    throw new Win32Exception("The user could not be logged on. Ensure that the user has an existing profile on the machine and that correct credentials are provided. Logon error #" + Marshal.GetLastWin32Error().ToString());
                 }
                 IntPtr hproc = GetCurrentProcess();
                 IntPtr htok = IntPtr.Zero;
                 bResult = OpenProcessToken(
-                        hproc, 
-                        TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, 
+                        hproc,
+                        TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY,
                         ref htok
                     );
                 if(!bResult)
@@ -362,8 +357,8 @@ namespace Source
                 tp.Luid = 0;
                 tp.Attr = SE_PRIVILEGE_ENABLED;
                 bResult = LookupPrivilegeValue(
-                    null, 
-                    SE_INCRASE_QUOTA, 
+                    null,
+                    SE_INCRASE_QUOTA,
                     ref tp.Luid
                     );
                 if(!bResult)
@@ -371,18 +366,18 @@ namespace Source
                     throw new Win32Exception("Error in looking up privilege of the process. This should not happen if DSC is running as LocalSystem Lookup privilege error #" + Marshal.GetLastWin32Error().ToString());
                 }
                 bResult = AdjustTokenPrivileges(
-                    htok, 
-                    false, 
-                    ref tp, 
-                    0, 
-                    IntPtr.Zero, 
+                    htok,
+                    false,
+                    ref tp,
+                    0,
+                    IntPtr.Zero,
                     IntPtr.Zero
                     );
                 if(!bResult)
                 {
                     throw new Win32Exception("Token elevation error #" + Marshal.GetLastWin32Error().ToString());
                 }
-                
+
                 bResult = DuplicateTokenEx(
                     hToken,
                     GENERIC_ALL_ACCESS,
@@ -402,13 +397,13 @@ namespace Source
                     hDupedToken,
                     null,
                     strCommand,
-                    ref sa, 
                     ref sa,
-                    false, 
-                    0, 
+                    ref sa,
+                    false,
+                    0,
                     IntPtr.Zero,
-                    null, 
-                    ref si, 
+                    null,
+                    ref si,
                     ref pi
                     );
                 if(!bResult)
@@ -496,11 +491,11 @@ function GetWin32ProcessOwner
     }
     catch
     {}
-    if($owner.Domain -ne $null)
+    if(($owner.Domain -ne $null) -and ($owner.Domain -ne $env:COMPUTERNAME))
     {
         return $Owner.Domain + "\" + $Owner.User
     }
-    else                
+    else
     {
         return $Owner.User
     }
@@ -611,7 +606,7 @@ function StartWin32Process
         }
         if (!(WaitForWin32ProcessStart @GetArguments))
         {
-            ThrowInvalidArgumentError "FailureWaitingForProcessesToStart" ($LocalizedData.ErrorStarting -f $Path,$LocalizedData.FailureWaitingForProcessesToStart)
+#            ThrowInvalidArgumentError "FailureWaitingForProcessesToStart" ($LocalizedData.ErrorStarting -f $Path,$LocalizedData.FailureWaitingForProcessesToStart)
         }
     }
     else
@@ -636,7 +631,10 @@ function WaitForWin32ProcessStart
         $Arguments,
 
         [PSCredential]
-        $Credential
+        $Credential,
+
+        [Int]
+        $Delay = 60000
     )
 
     $start = [DateTime]::Now
@@ -644,8 +642,8 @@ function WaitForWin32ProcessStart
     do
     {
         $value = @(GetWin32Process @GetArguments).Count -ge 1
-    } while(!$value -and ([DateTime]::Now - $start).TotalMilliseconds -lt 60000)
-    
+    } while(!$value -and ([DateTime]::Now - $start).TotalMilliseconds -lt $Delay)
+
     return $value
 }
 
@@ -667,41 +665,43 @@ function WaitForWin32ProcessEnd
     )
 
     $GetArguments = ExtractArguments $PSBoundParameters ("Path","Arguments","Credential")
-    While (WaitForWin32ProcessStart @GetArguments)
+    While (WaitForWin32ProcessStart @GetArguments -Delay 1000)
     {
         Start-Sleep 1
     }
-    Get-ScheduledTask | Where-Object {($_.TaskName.Length -ge 4) -and ($_.TaskName.Substring(0,4) -eq "xPDT") -and ($_.Actions.Execute -eq $Path) -and ($_.Actions.Arguments -eq $Arguments)} | Where-Object {$_ -ne $null} | Unregister-ScheduledTask -Confirm:$false
+    Get-ScheduledTask | Where-Object {($_.TaskName.StartsWith("xPDT")) -and ($_.Actions.Execute -eq $Path) -and ($_.Actions.Arguments -eq $Arguments)} | Where-Object {$_ -ne $null} | Unregister-ScheduledTask -Confirm:$false
 }
 
 function NetUse
 {
     param
-    (   
+    (
         [parameter(Mandatory)]
         [string]
         $SourcePath,
-        
+
         [parameter(Mandatory)]
         [PSCredential]
         $Credential,
-        
+
         [string]
+        [ValidateSet("Present","Absent")]
         $Ensure = "Present"
     )
 
     if(($SourcePath.Length -ge 2) -and ($SourcePath.Substring(0,2) -eq "\\"))
     {
-
+        $args = @()
         if ($Ensure -eq "Absent")
         {
-            $cmd = "net.exe use $SourcePath /del"
+            $args += "use", $SourcePath, "/del"
         }
-        else 
+        else
         {
-            $cmd = "net.exe use $SourcePath $($Credential.GetNetworkCredential().Password) /user:$($Credential.GetNetworkCredential().Domain)\$($Credential.GetNetworkCredential().UserName)"
+            $args += "use", $SourcePath, $($Credential.GetNetworkCredential().Password), "/user:$($Credential.GetNetworkCredential().Domain)\$($Credential.GetNetworkCredential().UserName)"
         }
-        Invoke-Expression $cmd
+
+        &"net" $args
     }
 }
 

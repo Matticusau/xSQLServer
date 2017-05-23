@@ -1,25 +1,38 @@
-install: 
-    - cinst -y pester
+#---------------------------------#
+#      environment configuration  #
+#---------------------------------#
+version: 5.0.{build}.0
+install:
     - git clone https://github.com/PowerShell/DscResource.Tests
+
+    - ps: |
+        Import-Module -Name "$env:APPVEYOR_BUILD_FOLDER\DscResource.Tests\AppVeyor.psm1"
+        Invoke-AppveyorInstallTask
+
+#---------------------------------#
+#      build configuration        #
+#---------------------------------#
 
 build: false
 
+#---------------------------------#
+#      test configuration         #
+#---------------------------------#
+
 test_script:
     - ps: |
-        $testResultsFile = ".\TestsResults.xml"
-        $res = Invoke-Pester -OutputFormat NUnitXml -OutputFile $testResultsFile -PassThru
-        (New-Object 'System.Net.WebClient').UploadFile("https://ci.appveyor.com/api/testresults/nunit/$($env:APPVEYOR_JOB_ID)", (Resolve-Path $testResultsFile))
-        if ($res.FailedCount -gt 0) { 
-            throw "$($res.FailedCount) tests failed."
-        }
-on_finish:
-    - ps: |
-        $stagingDirectory = (Resolve-Path ..).Path
-        $zipFile = Join-Path $stagingDirectory "$(Split-Path $pwd -Leaf).zip"
-        Add-Type -assemblyname System.IO.Compression.FileSystem
-        [System.IO.Compression.ZipFile]::CreateFromDirectory($pwd, $zipFile)
-        @(
-            # You can add other artifacts here
-            (ls $zipFile)
-        ) | % { Push-AppveyorArtifact $_.FullName }
+        Write-Verbose -Message 'Removing all SQL related PowerShell modules so they can not be used by the common tests.' -Verbose
+        Write-Verbose -Message 'This is a workaround because the AppVeyor build worker image contains SQL Server. More information in issue #239.' -Verbose
+        Write-Verbose -Message 'Modules that are being removed:' -Verbose
+        Get-Module -ListAvailable -Name 'sql*' | ForEach-Object -Process { Write-Verbose $_.Path -Verbose; Remove-Item $_.Path -Force -Verbose; }
 
+        Invoke-AppveyorTestScriptTask -CodeCoverage -CodeCovIo
+
+#---------------------------------#
+#      deployment configuration   #
+#---------------------------------#
+
+# scripts to run before deployment
+deploy_script:
+    - ps: |
+        Invoke-AppveyorAfterTestTask
